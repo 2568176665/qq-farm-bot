@@ -1,0 +1,113 @@
+name: Sync upstream and publish Docker image
+
+on:
+  schedule:
+    - cron: "*/30 * * * *"
+  workflow_dispatch:
+  push:
+    branches:
+      - master
+
+permissions:
+  contents: read
+
+concurrency:
+  group: qq-farm-bot-upstream-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    outputs:
+      should_publish: ${{ steps.sync.outputs.should_publish }}
+      sha: ${{ steps.sync.outputs.sha }}
+    steps:
+      - name: Check out fork
+        uses: actions/checkout@v4
+        with:
+          ref: master
+          fetch-depth: 0
+
+      - name: Fast-forward from upstream
+        id: sync
+        shell: bash
+        run: |
+          set -euo pipefail
+          git remote add upstream https://github.com/liyangpengs/qq-farm-bot.git
+          git fetch --no-tags upstream +refs/heads/master:refs/remotes/upstream/master
+
+          current_sha="$(git rev-parse HEAD)"
+          upstream_sha="$(git rev-parse refs/remotes/upstream/master)"
+          changed=false
+
+          if [[ "$current_sha" == "$upstream_sha" ]]; then
+            echo "Fork already matches upstream."
+          elif git merge-base --is-ancestor "$current_sha" "$upstream_sha"; then
+            git merge --ff-only "$upstream_sha"
+            git push origin HEAD:refs/heads/master
+            changed=true
+          elif git merge-base --is-ancestor "$upstream_sha" "$current_sha"; then
+            echo "Fork is ahead of upstream; no upstream update to apply."
+          else
+            echo "Fork and upstream have diverged; refusing to overwrite either branch." >&2
+            exit 1
+          fi
+
+          sha="$(git rev-parse HEAD)"
+          if [[ "$GITHUB_EVENT_NAME" == "schedule" && "$changed" != true ]]; then
+            should_publish=false
+          else
+            should_publish=true
+          fi
+
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "should_publish=$should_publish" >> "$GITHUB_OUTPUT"
+
+  publish:
+    needs: sync
+    permissions:
+      contents: read
+      packages: write
+    if: needs.sync.outputs.should_publish == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out synchronized fork
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.sync.outputs.sha }}
+
+      - name: Read app version
+        id: version
+        shell: bash
+        run: |
+          tag=$(node -p "require('./package.json').version")
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and publish image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: core/Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ghcr.io/2568176665/qq-farm-bot:latest
+            ghcr.io/2568176665/qq-farm-bot:${{ steps.version.outputs.tag }}
+            ghcr.io/2568176665/qq-farm-bot:${{ needs.sync.outputs.sha }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/2568176665/qq-farm-bot
+            org.opencontainers.image.revision=${{ needs.sync.outputs.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
