@@ -2,7 +2,7 @@ name: Sync upstream and publish Docker image
 
 on:
   schedule:
-    - cron: "*/30 * * * *"
+    - cron: "0 */6 * * *"
   workflow_dispatch:
   push:
     branches:
@@ -120,3 +120,28 @@ jobs:
             org.opencontainers.image.revision=${{ needs.sync.outputs.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  cleanup:
+    if: github.event_name == 'schedule'
+    permissions:
+      actions: write
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Delete sync runs older than 7 days
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          cutoff="$(date -u -d '7 days ago' +'%Y-%m-%dT%H:%M:%SZ')"
+          run_ids="$(
+            gh api --paginate \
+              --jq ".workflow_runs[] | select(.created_at < \"$cutoff\") | .id" \
+              "repos/${GITHUB_REPOSITORY}/actions/workflows/sync-upstream.yml/runs?per_page=100"
+          )"
+
+          while IFS= read -r run_id; do
+            [[ -n "$run_id" ]] || continue
+            gh api --method DELETE "repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}"
+            echo "Deleted workflow run ${run_id}."
+          done <<< "$run_ids"
