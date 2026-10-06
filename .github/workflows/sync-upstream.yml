@@ -19,13 +19,13 @@ jobs:
   sync:
     permissions:
       contents: write
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     outputs:
       should_publish: ${{ steps.sync.outputs.should_publish }}
       sha: ${{ steps.sync.outputs.sha }}
     steps:
       - name: Check out fork
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           ref: master
           fetch-depth: 0
@@ -51,8 +51,17 @@ jobs:
           elif git merge-base --is-ancestor "$upstream_sha" "$current_sha"; then
             echo "Fork is ahead of upstream; no upstream update to apply."
           else
-            echo "Fork and upstream have diverged; refusing to overwrite either branch." >&2
-            exit 1
+            if ! git merge-base "$current_sha" "$upstream_sha" >/dev/null; then
+              echo "Fork and upstream have no common history; refusing to overwrite either branch." >&2
+              exit 1
+            fi
+
+            echo "Fork and upstream have diverged; merging upstream while preserving fork commits."
+            git -c user.name="github-actions[bot]" \
+              -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+              merge --no-edit "$upstream_sha"
+            git push origin HEAD:refs/heads/master
+            changed=true
           fi
 
           sha="$(git rev-parse HEAD)"
@@ -71,10 +80,10 @@ jobs:
       contents: read
       packages: write
     if: needs.sync.outputs.should_publish == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Check out synchronized fork
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           ref: ${{ needs.sync.outputs.sha }}
 
