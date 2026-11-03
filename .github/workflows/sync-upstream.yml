@@ -2,7 +2,7 @@ name: Sync upstream and publish Docker image
 
 on:
   schedule:
-    - cron: "0 */6 * * *"
+    - cron: "30 20 * * *"
   workflow_dispatch:
   push:
     branches:
@@ -112,17 +112,18 @@ jobs:
           platforms: linux/amd64
           push: true
           tags: |
-            ghcr.io/2568176665/qq-farm-bot:latest
-            ghcr.io/2568176665/qq-farm-bot:${{ steps.version.outputs.tag }}
-            ghcr.io/2568176665/qq-farm-bot:${{ needs.sync.outputs.sha }}
+            ghcr.io/${{ github.repository }}:latest
+            ghcr.io/${{ github.repository }}:${{ steps.version.outputs.tag }}
+            ghcr.io/${{ github.repository }}:${{ needs.sync.outputs.sha }}
           labels: |
-            org.opencontainers.image.source=https://github.com/2568176665/qq-farm-bot
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
             org.opencontainers.image.revision=${{ needs.sync.outputs.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
   cleanup:
     if: github.event_name == 'schedule'
+    continue-on-error: true
     permissions:
       actions: write
     runs-on: ubuntu-24.04
