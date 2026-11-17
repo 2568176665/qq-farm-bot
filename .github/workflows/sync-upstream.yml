@@ -2,7 +2,8 @@ name: Sync upstream and publish Docker image
 
 on:
   schedule:
-    - cron: "30 20 * * *"
+    - cron: "40 20 * * *"
+    - cron: "10 9 * * *"
   workflow_dispatch:
   push:
     branches:
@@ -20,6 +21,7 @@ jobs:
     permissions:
       contents: write
     runs-on: ubuntu-24.04
+    timeout-minutes: 15
     outputs:
       should_publish: ${{ steps.sync.outputs.should_publish }}
       sha: ${{ steps.sync.outputs.sha }}
@@ -81,6 +83,7 @@ jobs:
       packages: write
     if: needs.sync.outputs.should_publish == 'true'
     runs-on: ubuntu-24.04
+    timeout-minutes: 60
     steps:
       - name: Check out synchronized fork
         uses: actions/checkout@v5
@@ -127,6 +130,7 @@ jobs:
     permissions:
       actions: write
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     steps:
       - name: Delete sync runs older than 7 days
         env:
